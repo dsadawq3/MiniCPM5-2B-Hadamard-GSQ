@@ -3,7 +3,7 @@
 ================================================================================
 F-LABS QUANTIZATION ENGINE: MiniCPM5-2B-Hadamard-GSQ
 DV-SSQ (Dense-Vectorized Subspace Salience Quantization)
-Walsh-Hadamard Spin Rotation + GSQ INT4 + RCO (Residual SVD) + Zero-Compression Shield
+Walsh-Hadamard Spin Rotation + group-wise INT4 + SRC (residual SVD) + Zero-Compression Shield
 ================================================================================
 """
 
@@ -74,7 +74,7 @@ def apply_block_hadamard(tensor: torch.Tensor, dim: int = -1) -> torch.Tensor:
 
 def quantize_gsq_int4_with_svd(weight: torch.Tensor, group_size: int = 64, rank: int = 16):
     """
-    Applies Group-Scale INT4 Quantization with Low-Rank Residual SVD Compensation (RCO).
+    Applies group-wise INT4 quantization with low-rank residual SVD compensation (SRC).
     Returns:
       q_weight: int8 tensor (values -8 to 7, packed or uint8)
       scales: float16 scales per group
@@ -85,7 +85,7 @@ def quantize_gsq_int4_with_svd(weight: torch.Tensor, group_size: int = 64, rank:
     m, n = weight.shape
     assert n % group_size == 0, f"n={n} not divisible by group_size={group_size}"
     
-    # 1. Group-Scale Quantization
+    # 1. Group-wise quantization
     w_grouped = weight.float().view(m, n // group_size, group_size)
     max_abs = torch.amax(torch.abs(w_grouped), dim=-1, keepdim=True).clamp(min=1e-5)
     scale = max_abs / 7.0
@@ -191,7 +191,7 @@ def process_model(raw_model_dir=None, quantized_model_dir=None):
             w_rotated = w
             
         # -------------------------------------------------------------
-        # PILLAR 5: INT4 GSQ + RESIDUAL SVD DECOMPOSITION (RCO)
+        # PILLAR 5: INT4 GROUP-WISE + RESIDUAL SVD DECOMPOSITION (SRC)
         # -------------------------------------------------------------
         q_w, scales, factor_a, factor_b = quantize_gsq_int4_with_svd(
             w_rotated, group_size=GROUP_SIZE, rank=rank
@@ -286,7 +286,7 @@ def process_model(raw_model_dir=None, quantized_model_dir=None):
     index_data = {
         "metadata": {
             "total_size": total_quantized_bytes,
-            "quantization": "DV-SSQ-Hadamard-GSQ",
+            "quantization": "DV-SSQ-Hadamard-groupwise",
             "spin_rotation": "Walsh-Hadamard-H128",
             "group_size": GROUP_SIZE,
             "bifurcation_rank": BIFURCATION_RANK,
@@ -323,7 +323,7 @@ def process_model(raw_model_dir=None, quantized_model_dir=None):
         with open(quant_cfg_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
         cfg["quantization_config"] = {
-            "quant_method": "hadamard_gsq",
+            "quant_method": "hadamard_groupwise_int4",
             "bits": 4,
             "group_size": GROUP_SIZE,
             "hadamard_spin": True,
@@ -350,7 +350,7 @@ def process_model(raw_model_dir=None, quantized_model_dir=None):
     print("=" * 70, flush=True)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="MiniCPM5-2B Master Hadamard-GSQ Quantizer (F-Labs)")
+    parser = argparse.ArgumentParser(description="MiniCPM5-2B Master Hadamard group-wise INT4 Quantizer (F-Labs)")
     parser.add_argument("--raw_dir", type=str, default=DEFAULT_RAW_MODEL_DIR, help="Path to raw model directory")
     parser.add_argument("--out_dir", type=str, default=DEFAULT_QUANT_MODEL_DIR, help="Path to output quantized model directory")
     args = parser.parse_args()

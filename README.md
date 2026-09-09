@@ -13,10 +13,10 @@ tags:
 - int8
 - dv-ssq
 - kv-bss
-- gsq
+- groupwise-int4
 - svd
 - low-rank
-- rco
+- src
 - minicpm
 - minicpm5
 - long-context
@@ -59,8 +59,8 @@ Standard uniform post-training quantization (such as naive INT4 or simple RTN) c
 To overcome these challenges, **F-Labs** combines established techniques into an edge-focused pipeline:
 1. **DV-SSQ (Dense-Vectorized Subspace Salience Quantization)**:
    - **Walsh-Hadamard ($H_{128} / H_{2048}$) Spin Rotation**: Leverages the exact power-of-two hidden dimension ($2048 = 2^{11}$) to rotate weight and activation spaces, fully diffusing channel outlier spikes into a uniform distribution.
-   - **INT4 Group-Scale Quantization (GSQ)**: Compresses the massive MLP parameter mass (which accounts for **67.4%** of the entire model) into 4-bit bins with group size `G = 64`.
-   - **Low-Rank SVD Residual Compensation (RCO)**: Factors the discretization error $R = W - \widehat{W}$ using truncated SVD (`r = 16` on base layers, `r = 24` on bifurcation abstraction circuits 14–28) stored in BF16, recovering the high-curvature eigenspace.
+   - **INT4 group-wise quantization**: Compresses the massive MLP parameter mass (which accounts for **67.4%** of the entire model) into 4-bit bins with group size `G = 64`.
+   - **Low-rank SVD residual compensation (SRC)**: Factors the discretization error $R = W - \widehat{W}$ using truncated SVD (`r = 16` on base layers, `r = 24` on bifurcation abstraction circuits 14–28) stored in BF16, recovering the high-curvature eigenspace.
    - **100% Zero-Compression Shield**: Preserves all 85 RMSNorm layers, projection biases, and token embeddings in pristine **BF16**.
    - **Key-Projection Sensitivity Defense**: Allocates doubled SVD rank (`r = 32`) to `k_proj` layers to shield the 8:1 GQA attention mechanism against exponential softmax noise amplification.
 2. **KV-BSS (Key-Value Binding Softmax Sharpening)**:
@@ -115,11 +115,11 @@ $$
 
 $$
 
-This eliminates activation clipping errors before group-scale discretization.
+This eliminates activation clipping errors before group-wise discretization.
 
 ---
 
-### 2. Group-Scale INT4 Quantization with Low-Rank Residual Compensation (RCO)
+### 2. Group-wise INT4 quantization with low-rank residual compensation (SRC)
 
 For each rotated weight matrix $W \in \mathbb{R}^{M \times N}$, parameters are partitioned into contiguous groups of `G = 64`:
 
@@ -221,10 +221,10 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 
 This release builds on established quantization literature; our contribution is the composition into an edge-focused pipeline plus per-model artifacts and edge measurements.
 
-- [QuaRot](https://arxiv.org/abs/2404.00456) — Hadamard rotation for quantization; we use the same principle with fixed H128/H2048 Walsh-Hadamard blocks + GSQ, without claiming the rotation itself.
+- [QuaRot](https://arxiv.org/abs/2404.00456) — Hadamard rotation for quantization; we use the same principle with fixed H128/H2048 Walsh-Hadamard blocks + group-wise INT4, without claiming the rotation itself.
 - [SpinQuant](https://arxiv.org/abs/2405.16406) — learned rotations; we use fixed Walsh-Hadamard blocks with no training, trading adaptivity for edge simplicity.
-- [GPTQ](https://arxiv.org/abs/2210.17323) / [AWQ](https://arxiv.org/abs/2306.00978) — group quantization and salient channels; our GSQ (g=64) and INT8 tier follow in the spirit of that work.
-- [ZeroQuant-V2](https://arxiv.org/abs/2307.09782) / [LoRC](https://arxiv.org/abs/2312.09934) — low-rank compensation of quantization error; our RCO is the same class of idea applied to GSQ residuals.
+- [GPTQ](https://arxiv.org/abs/2210.17323) / [AWQ](https://arxiv.org/abs/2306.00978) — group quantization and salient channels; our group-wise INT4 (g=64) and INT8 tier follow in the spirit of that work.
+- [ZeroQuant-V2](https://arxiv.org/abs/2307.09782) / [LoRC](https://arxiv.org/abs/2312.09934) — low-rank compensation of quantization error; our SRC is the same class of idea applied to group-wise INT4 residuals.
 - [LLM.int8()](https://arxiv.org/abs/2208.07339) / [SpQR](https://arxiv.org/abs/2306.03078) — mixed precision for outliers; our DV-SSQ salient tier follows the same approach.
 
 ---

@@ -3,7 +3,7 @@ PyTorch modeling implementation for MiniCPM5-2B-Hadamard-GSQ.
 Engineered at F-Labs.
 
 Features:
-- HadamardLinear4bit: Group-scale INT4 with Walsh-Hadamard spin and Low-Rank SVD (RCO)
+- HadamardLinear4bit: Group-wise INT4 with Walsh-Hadamard spin and Low-Rank SVD (SRC)
 - ZeroCompressionShield: Pure BF16 RMSNorms, Biases, and Embeddings
 - Dynamic Bifurcation Layer Rank Allocation (Layers 14-27 with r=bifurcation_rank)
 - Key-Projection Sensitivity Defense (r=k_proj_rank on k_proj)
