@@ -142,11 +142,17 @@ $$
 In long contexts up to 128K tokens, standard attention logits $A = \frac{Q K^T}{\sqrt{d}}$ suffer from entropy dispersion. KV-BSS applies:
 
 1. **Temperature Sharpening**:
-   $$A_{\text{focus}} = \frac{Q K^T}{\sqrt{d_k}} \cdot \tau_{\text{focus}}, \quad \tau_{\text{focus}} = 1.10$$
+   
+
+$$A_{\text{focus}} = \frac{Q K^T}{\sqrt{d_k}} \cdot \tau_{\text{focus}}, \quad \tau_{\text{focus}} = 1.10$$
 2. **Attention Haze Floor Suppression**:
-   $$\text{Mask}_{i, j} = \mathbb{I}\left(A_{i, j} < \max_k(A_{i, k}) - 12.0\right), \quad A_{\text{filtered}} = A_{\text{focus}} \odot (1 - \text{Mask}) + (-\infty) \odot \text{Mask}$$
+   
+
+$$\text{Mask}_{i, j} = \mathbb{I}\left(A_{i, j} < \max_k(A_{i, k}) - 12.0\right), \quad A_{\text{filtered}} = A_{\text{focus}} \odot (1 - \text{Mask}) + (-\infty) \odot \text{Mask}$$
 3. **Sharpened Probability Distribution**:
-   $$P = \operatorname{Softmax}\left(A_{\text{filtered}}\right)$$
+   
+
+$$P = \operatorname{Softmax}\left(A_{\text{filtered}}\right)$$
 
 This concentrates attention weights on the exact structured key binding (e.g. `["key"] => "value"`) and suppresses long-range hallucination.
 
