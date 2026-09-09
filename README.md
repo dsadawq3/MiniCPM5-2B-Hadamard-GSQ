@@ -34,8 +34,8 @@ model_name: MiniCPM5-2B-Hadamard-GSQ
 [![Hugging Face Model](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-F--Labs%2FMiniCPM5--2B--Hadamard--GSQ-blue.svg)](https://huggingface.co/F-Labs/MiniCPM5-2B-Hadamard-GSQ)
 [![GitHub Repository](https://img.shields.io/badge/GitHub-dsadawq3%2FMiniCPM5--2B--Hadamard--GSQ-black?logo=github)](https://github.com/dsadawq3/MiniCPM5-2B-Hadamard-GSQ)
 [![License](https://img.shields.io/badge/License-Apache%202.0-yellow.svg)](LICENSE)
-[![Size](https://img.shields.io/badge/Memory-2.03%20GB%20(-56.6%25)-purple.svg)](#-empirical-scorecard)
-[![Context](https://img.shields.io/badge/Context-128K%20Tokens-green.svg)](#-128k-context--kv-bss-associative-recall)
+[![Size](https://img.shields.io/badge/Memory-2.03%20GB%20(-56.6%25)-purple.svg)](#empirical-scorecard)
+[![Context](https://img.shields.io/badge/Context-128K%20Tokens-green.svg)](#empirical-scorecard)
 
 <p align="center">
   <b>2.40B Parameters Compressed to 2.03 GB</b> • <b>128K Context Window</b> • <b>Zero Attention Drift (Pure BF16 Shield)</b>
@@ -45,7 +45,7 @@ model_name: MiniCPM5-2B-Hadamard-GSQ
 
 ---
 
-## 📌 Executive Overview
+## Executive Overview
 
 **MiniCPM5-2B-Hadamard-GSQ** is a production-grade, edge-optimized compressed release of OpenBMB's flagship **MiniCPM5-2B** foundation model, engineered at **F-Labs**.
 
@@ -68,7 +68,9 @@ To overcome these challenges, **F-Labs** introduces a dual-engine compression pa
 
 ---
 
-## 🔬 Empirical Scorecard
+<a id="empirical-scorecard"></a>
+
+## Empirical Scorecard
 
 | Metric Vector | Raw Base Model (BF16) | MiniCPM5-2B-Hadamard-GSQ | Empirical Significance |
 | :--- | :---: | :---: | :--- |
@@ -85,7 +87,7 @@ To overcome these challenges, **F-Labs** introduces a dual-engine compression pa
 
 ---
 
-## 🏛️ Mathematical Foundations
+## Mathematical Foundations
 
 ### 1. Walsh-Hadamard Spin Rotation (QuaRot / SpinQuant)
 
@@ -172,7 +174,7 @@ This concentrates attention weights on the exact structured key binding (e.g. `[
 
 ---
 
-## 🚀 Quick Start & Inference
+## Quick Start & Inference
 
 ```python
 import torch
@@ -207,7 +209,7 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 
 ---
 
-## 📢 Notice on Model Quality, Iterative Reformation & Strategic Roadmap
+## Notice on Model Quality, Iterative Reformation & Strategic Roadmap
 
 > **Ecosystem Distribution & Continuous Evolution Notice**:
 > Architectural parameters, SVD rank allocations, and reconstruction tolerances in this model are powered by the **[FQuant Framework](https://github.com/dsadawq3/FQuant)**. 
@@ -216,7 +218,7 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 > For framework issues, questions, or new architecture requests, visit **[FQuant GitHub](https://github.com/dsadawq3/FQuant/issues)**.
 
 
-## 📄 License & Attribution
+## License & Attribution
 
 - **Base Model**: MiniCPM5-2B by [OpenBMB](https://huggingface.co/openbmb) (Apache 2.0).
 - **Quantization & Architectural Enhancements**: Engineered at **F-Labs** (Apache 2.0).
