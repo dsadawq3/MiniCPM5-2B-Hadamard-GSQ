@@ -204,6 +204,18 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 
 ---
 
+
+---
+
+## 📢 Notice on Model Quality, Iterative Reformation & Strategic Roadmap
+
+> **Ecosystem Distribution & Continuous Evolution Notice**:
+> Architectural parameters, SVD rank allocations, and reconstruction tolerances in this model are powered by the **[FQuant Framework](https://github.com/dsadawq3/FQuant)**. 
+> As mathematical optimizations advance, models will periodically undergo architectural reformations and quality updates. 
+> Our current active roadmap focuses on broad open foundation model distribution, edge hardware validation, and community availability across devices.
+> For framework issues, questions, or new architecture requests, visit **[FQuant GitHub](https://github.com/dsadawq3/FQuant/issues)**.
+
+
 ## 📄 License & Attribution
 
 - **Base Model**: MiniCPM5-2B by [OpenBMB](https://huggingface.co/openbmb) (Apache 2.0).
