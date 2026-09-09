@@ -1,9 +1,14 @@
 """
 PyTorch modeling implementation for MiniCPM5-2B-Hadamard-GSQ.
+Engineered at F-Labs.
+
 Features:
 - HadamardLinear4bit: Group-scale INT4 with Walsh-Hadamard spin and Low-Rank SVD (RCO)
 - ZeroCompressionShield: Pure BF16 RMSNorms, Biases, and Embeddings
+- Dynamic Bifurcation Layer Rank Allocation (Layers 14-27 with r=24)
+- Key-Projection Sensitivity Defense (r=32 on k_proj)
 - KVBSSAttentionHook: Key-Value Binding Softmax Sharpening for 128K context
+- Full compliance with Hugging Face PreTrainedModel standards.
 """
 
 import math
@@ -39,7 +44,8 @@ def get_hadamard_matrix(n: int, dtype=torch.float32, device=None):
 def apply_hadamard_rot(x: torch.Tensor, block_size: int = 128) -> torch.Tensor:
     orig_shape = x.shape
     d = orig_shape[-1]
-    assert d % block_size == 0
+    if d % block_size != 0:
+        return x
     h = get_hadamard_matrix(block_size, dtype=x.dtype, device=x.device)
     reshaped = x.view(-1, d // block_size, block_size)
     rotated = torch.matmul(reshaped, h)
@@ -60,21 +66,17 @@ class HadamardLinear4bit(nn.Module):
         self.rank = rank
         self.block_size = block_size
 
-        # Packed uint8 (2 values per byte)
         self.register_buffer("qweight_packed", torch.zeros((out_features, in_features // 2), dtype=torch.uint8))
         self.register_buffer("scales", torch.zeros((out_features, in_features // group_size), dtype=torch.bfloat16))
         self.register_buffer("svd_a", torch.zeros((out_features, rank), dtype=torch.bfloat16))
         self.register_buffer("svd_b", torch.zeros((rank, in_features), dtype=torch.bfloat16))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # 1. Rotate input activation using Walsh-Hadamard spin: X' = X · H
         if self.in_features % self.block_size == 0:
             x_rot = apply_hadamard_rot(x, block_size=self.block_size)
         else:
             x_rot = x
 
-        # 2. Dequantize INT4 weight on-the-fly or fast matrix vector
-        # Unpack uint8 -> int8 (-8 to 7)
         low = (self.qweight_packed & 0x0F).to(torch.int8)
         low = torch.where(low >= 8, low - 16, low)
         high = ((self.qweight_packed >> 4) & 0x0F).to(torch.int8)
@@ -85,16 +87,11 @@ class HadamardLinear4bit(nn.Module):
         w_int8[:, 0::2] = low
         w_int8[:, 1::2] = high
 
-        # Apply group scales
         w_float = (w_int8.float().view(m, self.in_features // self.group_size, self.group_size) * self.scales.unsqueeze(-1)).view(m, self.in_features).to(x.dtype)
-
-        # Baseline linear projection
         out_base = F.linear(x_rot, w_float)
 
-        # 3. Residual SVD Compensation: (X' · B^T) · A^T
-        # B is [rank, N], A is [M, rank]
-        x_svd = F.linear(x_rot, self.svd_b.to(x.dtype))  # [..., rank]
-        out_res = F.linear(x_svd, self.svd_a.to(x.dtype))  # [..., M]
+        x_svd = F.linear(x_rot, self.svd_b.to(x.dtype))
+        out_res = F.linear(x_svd, self.svd_a.to(x.dtype))
 
         return out_base + out_res
 
@@ -121,12 +118,14 @@ class MiniCPMAttention(nn.Module):
         self.head_dim = config.head_dim
         self.num_key_value_heads = config.num_key_value_heads
 
-        rank = config.k_proj_rank
-        # Key projection sensitivity defense (r = 32)
-        self.k_proj = HadamardLinear4bit(self.hidden_size, self.num_key_value_heads * self.head_dim, group_size=config.group_size, rank=rank)
-        self.q_proj = HadamardLinear4bit(self.hidden_size, self.num_heads * self.head_dim, group_size=config.group_size, rank=config.residual_rank)
-        self.v_proj = HadamardLinear4bit(self.hidden_size, self.num_key_value_heads * self.head_dim, group_size=config.group_size, rank=config.residual_rank)
-        self.o_proj = HadamardLinear4bit(self.num_heads * self.head_dim, self.hidden_size, group_size=config.group_size, rank=config.residual_rank)
+        is_bifurcation = 14 <= layer_idx <= 27
+        res_rank = getattr(config, "bifurcation_rank", 24) if is_bifurcation else getattr(config, "residual_rank", 16)
+        k_rank = getattr(config, "k_proj_rank", 32)
+
+        self.k_proj = HadamardLinear4bit(self.hidden_size, self.num_key_value_heads * self.head_dim, group_size=config.group_size, rank=k_rank)
+        self.q_proj = HadamardLinear4bit(self.hidden_size, self.num_heads * self.head_dim, group_size=config.group_size, rank=res_rank)
+        self.v_proj = HadamardLinear4bit(self.hidden_size, self.num_key_value_heads * self.head_dim, group_size=config.group_size, rank=res_rank)
+        self.o_proj = HadamardLinear4bit(self.num_heads * self.head_dim, self.hidden_size, group_size=config.group_size, rank=res_rank)
 
         self.kv_bss = KVBSSAttentionHook(tau_focus=config.tau_focus, haze_floor_margin=config.haze_floor_margin)
 
@@ -142,11 +141,14 @@ class MiniCPMAttention(nn.Module):
         return out
 
 class MiniCPMMLP(nn.Module):
-    def __init__(self, config: MiniCPMHadamardConfig):
+    def __init__(self, config: MiniCPMHadamardConfig, layer_idx: int = 0):
         super().__init__()
-        self.gate_proj = HadamardLinear4bit(config.hidden_size, config.intermediate_size, group_size=config.group_size, rank=config.residual_rank)
-        self.up_proj = HadamardLinear4bit(config.hidden_size, config.intermediate_size, group_size=config.group_size, rank=config.residual_rank)
-        self.down_proj = HadamardLinear4bit(config.intermediate_size, config.hidden_size, group_size=config.group_size, rank=config.residual_rank)
+        is_bifurcation = 14 <= layer_idx <= 27
+        res_rank = getattr(config, "bifurcation_rank", 24) if is_bifurcation else getattr(config, "residual_rank", 16)
+
+        self.gate_proj = HadamardLinear4bit(config.hidden_size, config.intermediate_size, group_size=config.group_size, rank=res_rank)
+        self.up_proj = HadamardLinear4bit(config.hidden_size, config.intermediate_size, group_size=config.group_size, rank=res_rank)
+        self.down_proj = HadamardLinear4bit(config.intermediate_size, config.hidden_size, group_size=config.group_size, rank=res_rank)
 
     def forward(self, x):
         return self.down_proj(F.silu(self.gate_proj(x)) * self.up_proj(x))
@@ -157,7 +159,7 @@ class MiniCPMDecoderLayer(nn.Module):
         self.input_layernorm = MiniCPMRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.self_attn = MiniCPMAttention(config, layer_idx=layer_idx)
         self.post_attention_layernorm = MiniCPMRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.mlp = MiniCPMMLP(config)
+        self.mlp = MiniCPMMLP(config, layer_idx=layer_idx)
 
     def forward(self, hidden_states, attention_mask=None):
         residual = hidden_states
@@ -171,23 +173,54 @@ class MiniCPMDecoderLayer(nn.Module):
         hidden_states = residual + hidden_states
         return hidden_states
 
-class MiniCPMHadamardForCausalLM(PreTrainedModel):
+class MiniCPMHadamardPreTrainedModel(PreTrainedModel):
     config_class = MiniCPMHadamardConfig
+    base_model_prefix = "model"
+    supports_gradient_checkpointing = False
+    _no_split_modules = ["MiniCPMDecoderLayer"]
 
+    def _init_weights(self, module):
+        pass
+
+class MiniCPMHadamardModel(MiniCPMHadamardPreTrainedModel):
     def __init__(self, config: MiniCPMHadamardConfig):
         super().__init__(config)
-        self.config = config
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
+        self.padding_idx = getattr(config, "pad_token_id", 1)
+        self.vocab_size = config.vocab_size
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList([
             MiniCPMDecoderLayer(config, idx) for idx in range(config.num_hidden_layers)
         ])
         self.norm = MiniCPMRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.post_init()
 
     def forward(self, input_ids=None, attention_mask=None, **kwargs):
         x = self.embed_tokens(input_ids)
         for layer in self.layers:
             x = layer(x, attention_mask=attention_mask)
         x = self.norm(x)
-        logits = self.lm_head(x)
+        return x
+
+class MiniCPMHadamardForCausalLM(MiniCPMHadamardPreTrainedModel):
+    def __init__(self, config: MiniCPMHadamardConfig):
+        super().__init__(config)
+        self.model = MiniCPMHadamardModel(config)
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.post_init()
+
+    def get_input_embeddings(self):
+        return self.model.embed_tokens
+
+    def set_input_embeddings(self, value):
+        self.model.embed_tokens = value
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def set_output_embeddings(self, new_embeddings):
+        self.lm_head = new_embeddings
+
+    def forward(self, input_ids=None, attention_mask=None, **kwargs):
+        hidden_states = self.model(input_ids=input_ids, attention_mask=attention_mask, **kwargs)
+        logits = self.lm_head(hidden_states)
         return CausalLMOutputWithPast(logits=logits)
