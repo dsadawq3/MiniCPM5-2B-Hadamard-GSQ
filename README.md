@@ -158,7 +158,7 @@ In long contexts up to 128K tokens, standard attention logits $A = \frac{Q K^T}{
 1. **Temperature Sharpening**:
    
 
-$$A_{\text{focus}} = \frac{Q K^T}{\sqrt{d_k}} \cdot τ_focus, \quad τ_focus = 1.10$$
+$$A_{\text{focus}} = \frac{Q K^T}{\sqrt{d_k}} \cdot \tau_focus, \quad \tau_focus = 1.10$$
 
 2. **Attention Haze Floor Suppression**:
    

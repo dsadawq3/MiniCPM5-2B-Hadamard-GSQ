@@ -16,9 +16,15 @@ import shutil
 import torch
 import numpy as np
 from safetensors.torch import load_file, save_file
+import argparse
+from pathlib import Path
 
-RAW_MODEL_DIR = r"C:\Users\PC MOD\Desktop\minicpm_hadamard_quant\raw_model"
-QUANT_MODEL_DIR = r"C:\Users\PC MOD\Desktop\minicpm_hadamard_quant\quantized_model"
+_SCRIPT_DIR = Path(__file__).resolve().parent
+
+DEFAULT_RAW_MODEL_DIR = str(_SCRIPT_DIR / "raw_model")
+DEFAULT_QUANT_MODEL_DIR = str(_SCRIPT_DIR)
+RAW_MODEL_DIR = DEFAULT_RAW_MODEL_DIR
+QUANT_MODEL_DIR = DEFAULT_QUANT_MODEL_DIR
 
 # Hyperparameters
 GROUP_SIZE = 64
@@ -108,7 +114,12 @@ def quantize_gsq_int4_with_svd(weight: torch.Tensor, group_size: int = 64, rank:
         
     return q_grouped.view(m, n), scale.squeeze(-1).to(torch.bfloat16), factor_a, factor_b
 
-def process_model():
+def process_model(raw_model_dir=None, quantized_model_dir=None):
+    global RAW_MODEL_DIR, QUANT_MODEL_DIR
+    if raw_model_dir:
+        RAW_MODEL_DIR = str(raw_model_dir)
+    if quantized_model_dir:
+        QUANT_MODEL_DIR = str(quantized_model_dir)
     print("=" * 70, flush=True)
     print("Starting F-Labs MiniCPM5-2B Quantization Pipeline", flush=True)
     print("=" * 70, flush=True)
@@ -339,4 +350,8 @@ def process_model():
     print("=" * 70, flush=True)
 
 if __name__ == "__main__":
-    process_model()
+    parser = argparse.ArgumentParser(description="MiniCPM5-2B Master Hadamard-GSQ Quantizer (F-Labs)")
+    parser.add_argument("--raw_dir", type=str, default=DEFAULT_RAW_MODEL_DIR, help="Path to raw model directory")
+    parser.add_argument("--out_dir", type=str, default=DEFAULT_QUANT_MODEL_DIR, help="Path to output quantized model directory")
+    args = parser.parse_args()
+    process_model(args.raw_dir, args.out_dir)

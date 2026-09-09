@@ -1,8 +1,6 @@
-"""
-Configuration class for MiniCPM5-2B-Hadamard-GSQ.
-"""
-
+"""MiniCPMHadamardConfig — explicit bifurcation_rank added."""
 from transformers.configuration_utils import PretrainedConfig
+
 
 class MiniCPMHadamardConfig(PretrainedConfig):
     model_type = "minicpm_hadamard"
@@ -27,11 +25,11 @@ class MiniCPMHadamardConfig(PretrainedConfig):
         eos_token_id=[1, 130073],
         tie_word_embeddings=False,
         rope_theta=5000000.0,
-        # Quantization parameters
         bits=4,
         group_size=64,
         hadamard_block_size=128,
         residual_rank=16,
+        bifurcation_rank=24,
         k_proj_rank=32,
         tau_focus=1.10,
         haze_floor_margin=12.0,
@@ -61,6 +59,7 @@ class MiniCPMHadamardConfig(PretrainedConfig):
         self.group_size = group_size
         self.hadamard_block_size = hadamard_block_size
         self.residual_rank = residual_rank
+        self.bifurcation_rank = bifurcation_rank
         self.k_proj_rank = k_proj_rank
         self.tau_focus = tau_focus
         self.haze_floor_margin = haze_floor_margin
