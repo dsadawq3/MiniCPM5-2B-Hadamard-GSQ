@@ -64,7 +64,7 @@ To overcome these challenges, **F-Labs** introduces a dual-engine compression pa
    - **100% Zero-Compression Shield**: Preserves all 85 RMSNorm layers, projection biases, and token embeddings in pristine **BF16**.
    - **Key-Projection Sensitivity Defense**: Allocates doubled SVD rank ($r=32$) to `k_proj` layers to shield the 8:1 GQA attention mechanism against exponential softmax noise amplification.
 2. **KV-BSS (Key-Value Binding Softmax Sharpening)**:
-   - Contrastive focus temperature scaling ($\tau_{\text{focus}} = 1.10$) and dynamic attention haze suppression ($< \max - 12.0$), hardening the hallucination threshold and sharpening associative recall on long documents and structured data.
+   - Contrastive focus temperature scaling (τ_focus = 1.10) and dynamic attention haze suppression ($< \max - 12.0$), hardening the hallucination threshold and sharpening associative recall on long documents and structured data.
 
 ---
 
@@ -77,10 +77,10 @@ To overcome these challenges, **F-Labs** introduces a dual-engine compression pa
 | **Context Window** | 131,072 tokens (128K) | **131,072 tokens (128K)** | **Full Long-Context Window Preserved** |
 | **Effective Precision** | 16.00 bits / param | **~4.20 bits / param** | **Near-lossless 4-bit representation** |
 | **GQA Head Ratio** | 16 Query / 2 KV Heads | **16 Query / 2 KV Heads** | **Zero KV drift via $r=32$ Shield** |
-| **Outlier Suppression** | Raw coordinates | **-82.4% Outlier Peak Drop** | **Walsh-Hadamard ($H_{128}$) Spin Rotation** |
+| **Outlier Suppression** | Raw coordinates | **-82.4% Outlier Peak Drop** | **Walsh-Hadamard (H₁₂₈) Spin Rotation** |
 | **85 RMSNorm Layers** | 100% BF16 | **100% Pristine BF16** | **Zero-Compression Shield (Zero Phase Drift)** |
 | **Token Embeddings** | 100% BF16 | **100% Pristine BF16** | **Perfect Vocabulary Token Mapping** |
-| **KV-BSS Focus Factor** | 1.00 | **1.10 ($\tau_{\text{focus}}$)** | **Sharpened Key-Value Association** |
+| **KV-BSS Focus Factor** | 1.00 | **1.10 (τ_focus)** | **Sharpened Key-Value Association** |
 | **Attention Haze Floor** | Disabled | **$\ge \max - 12.0$** | **Eliminates Long-Context Hallucinations** |
 
 ---
@@ -113,7 +113,7 @@ This eliminates activation clipping errors before group-scale discretization.
 
 ### 2. Group-Scale INT4 Quantization with Low-Rank Residual Compensation (RCO)
 
-For each rotated weight matrix $W \in \mathbb{R}^{M \times N}$, parameters are partitioned into contiguous groups of $G = 64$:
+For each rotated weight matrix $W \in \mathbb{R}^{M \times N}$, parameters are partitioned into contiguous groups of `G = 64`:
 
 $$
 s_g = \frac{\max_{j \in g} |W_{i, j}|}{7.0}, \quad Q_{i, j} = \operatorname{clip}\left(\left\lfloor \frac{W_{i, j}}{s_g} \right\rceil, -8, 7\right)
