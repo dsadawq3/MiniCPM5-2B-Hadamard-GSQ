@@ -332,9 +332,13 @@ class MiniCPMHadamardModel(MiniCPMHadamardPreTrainedModel):
         else:
             past_len = 0
 
-        if cache_position is None:
+        # NOTE (transformers>=5 compat): generate() passes trimmed input_ids with
+        # FULL-length position_ids (and sometimes a stale cache_position). Trusting
+        # them blindly lets RoPE broadcast-expand the query length, which breaks
+        # KV-BSS masking (scores kv != mask kv). Rebuild whenever shapes disagree.
+        if cache_position is None or cache_position.shape[0] != q_len:
             cache_position = torch.arange(past_len, past_len + q_len, device=device)
-        if position_ids is None:
+        if position_ids is None or position_ids.shape[-1] != q_len:
             position_ids = cache_position.unsqueeze(0).expand(b, -1)
 
         kv_len = past_len + q_len
