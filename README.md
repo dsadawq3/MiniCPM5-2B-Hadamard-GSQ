@@ -24,6 +24,31 @@ tags:
 - edge-ai
 base_model: openbmb/MiniCPM5-2B
 model_name: MiniCPM5-2B-Hadamard-GSQ
+model-index:
+- name: MiniCPM5-2B-Hadamard-GSQ
+  results:
+  - task:
+      type: text-generation
+    dataset:
+      name: custom
+      type: custom
+      split: compression-audit
+    metrics:
+    - name: model size (quantized)
+      type: model size
+      value: 2.03
+      unit: GB
+      value_string: 2.03 GB
+    - name: compression ratio
+      type: compression ratio
+      value: 2.30
+      value_string: 2.30x
+    - name: size reduction
+      type: size reduction
+      value: -56.6
+      unit: percent
+      value_string: -56.6%
+
 ---
 
 <div align="center">
