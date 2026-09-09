@@ -56,7 +56,7 @@ Standard uniform post-training quantization (such as naive INT4 or simple RTN) c
 2. **Attention Head Collapse**: MiniCPM5-2B utilizes Grouped-Query Attention (GQA) with an extreme **8:1 query-to-KV head ratio** (`num_key_value_heads: 2`). A tiny perturbation in the 2 KV heads corrupts 50% of the layer's associative memory.
 3. **128K Attention Dispersion (Haze)**: Long contexts cause Softmax attention probabilities to diffuse across thousands of irrelevant background tokens, leading to entity and key-value hallucinations (`["key"] => "value"`).
 
-To overcome these challenges, **F-Labs** introduces a dual-engine compression paradigm:
+To overcome these challenges, **F-Labs** combines established techniques into an edge-focused pipeline:
 1. **DV-SSQ (Dense-Vectorized Subspace Salience Quantization)**:
    - **Walsh-Hadamard ($H_{128} / H_{2048}$) Spin Rotation**: Leverages the exact power-of-two hidden dimension ($2048 = 2^{11}$) to rotate weight and activation spaces, fully diffusing channel outlier spikes into a uniform distribution.
    - **INT4 Group-Scale Quantization (GSQ)**: Compresses the massive MLP parameter mass (which accounts for **67.4%** of the entire model) into 4-bit bins with group size `G = 64`.
@@ -217,6 +217,17 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 > Our current active roadmap focuses on broad open foundation model distribution, edge hardware validation, and community availability across devices.
 > For framework issues, questions, or new architecture requests, visit **[FQuant GitHub](https://github.com/dsadawq3/FQuant/issues)**.
 
+## Related Work & Attribution
+
+This release builds on established quantization literature; our contribution is the composition into an edge-focused pipeline plus per-model artifacts and edge measurements.
+
+- [QuaRot](https://arxiv.org/abs/2404.00456) — Hadamard rotation for quantization; we use the same principle with fixed H128/H2048 Walsh-Hadamard blocks + GSQ, without claiming the rotation itself.
+- [SpinQuant](https://arxiv.org/abs/2405.16406) — learned rotations; we use fixed Walsh-Hadamard blocks with no training, trading adaptivity for edge simplicity.
+- [GPTQ](https://arxiv.org/abs/2210.17323) / [AWQ](https://arxiv.org/abs/2306.00978) — group quantization and salient channels; our GSQ (g=64) and INT8 tier follow in the spirit of that work.
+- [ZeroQuant-V2](https://arxiv.org/abs/2307.09782) / [LoRC](https://arxiv.org/abs/2312.09934) — low-rank compensation of quantization error; our RCO is the same class of idea applied to GSQ residuals.
+- [LLM.int8()](https://arxiv.org/abs/2208.07339) / [SpQR](https://arxiv.org/abs/2306.03078) — mixed precision for outliers; our DV-SSQ salient tier follows the same approach.
+
+---
 
 ## License & Attribution
 
