@@ -566,6 +566,11 @@ class MiniCPMHadamardForCausalLM(MiniCPMHadamardPreTrainedModel, GenerationMixin
             cache_position=cache_position, inputs_embeds=inputs_embeds, **kwargs,
         )
         logits = self.lm_head(hidden.last_hidden_state)
+        # Quantized CPU paths must never hand non-finite values to a
+        # generation sampler.  The attention kernel contains the source
+        # anomaly where possible; this final boundary is a deployment guard
+        # for any residual overflow in the custom path.
+        logits = torch.nan_to_num(logits, nan=0.0, posinf=0.0, neginf=0.0)
         loss = None
         if labels is not None:
             loss = F.cross_entropy(logits.view(-1, logits.shape[-1]), labels.view(-1), ignore_index=-100)
