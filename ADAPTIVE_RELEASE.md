@@ -29,6 +29,16 @@ This is a quality-oriented intermediate point; it deliberately trades some
 compression for lower logit drift. The release report records the exact layer
 rank map and calibration moments.
 
+## Update — 2026-09-12
+
+The local release was refreshed after a numerical review of the loader and
+KV-BSS path. The update validates GQA head divisibility and attention-mask
+shapes, keeps fully masked attention rows finite, initializes scratch models
+deterministically, and adds cache-versus-uncached logit parity checks. The
+current repository test suite passes **6 tests**. The model artifact itself is
+unchanged by these runtime checks; its calibration report remains the source
+of truth for the measured quality probe above.
+
 ## Load
 
 ```python

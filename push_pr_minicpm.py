@@ -1,14 +1,14 @@
 """HF PR pusher for MiniCPM5-2B-Hadamard-GSQ files (NOT a test).
 
 Usage:
-    $env:HF_TOKEN = "<token>"
+    hf auth login
     python push_pr_minicpm.py --repo openbmb/MiniCPM5-2B --revision refs/pr/11
 """
 import argparse
 import os
 import sys
 
-from huggingface_hub import HfApi, CommitOperationAdd
+from huggingface_hub import HfApi, CommitOperationAdd, get_token
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -30,9 +30,15 @@ def main() -> int:
     ap.add_argument("--revision", default="refs/pr/11")
     args = ap.parse_args()
 
-    token = os.environ.get("HF_TOKEN")
+    # Prefer explicit environment variables for CI, then use the token saved
+    # by `hf auth login`. Never print the token.
+    token = (
+        os.environ.get("HF_TOKEN")
+        or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+        or get_token()
+    )
     if not token:
-        print("HF_TOKEN env var is not set; refusing to push.", file=sys.stderr)
+        print("No Hugging Face token found; run `hf auth login` first.", file=sys.stderr)
         return 2
 
     api = HfApi(token=token)

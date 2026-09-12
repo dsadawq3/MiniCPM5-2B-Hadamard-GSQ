@@ -453,7 +453,16 @@ class MiniCPMHadamardPreTrainedModel(PreTrainedModel):
     _no_split_modules = ["MiniCPMDecoderLayer"]
 
     def _init_weights(self, module):
-        pass
+        """Initialize scratch models while leaving quantized buffers untouched."""
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            std = float(getattr(self.config, "initializer_range", 0.02))
+            with torch.no_grad():
+                module.weight.normal_(mean=0.0, std=std)
+                if getattr(module, "bias", None) is not None:
+                    module.bias.zero_()
+        elif isinstance(module, MiniCPMRMSNorm):
+            with torch.no_grad():
+                module.weight.fill_(1.0)
 
 
 class MiniCPMHadamardModel(MiniCPMHadamardPreTrainedModel):
