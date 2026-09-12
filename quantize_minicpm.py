@@ -22,7 +22,7 @@ from pathlib import Path
 _SCRIPT_DIR = Path(__file__).resolve().parent
 
 DEFAULT_RAW_MODEL_DIR = str(_SCRIPT_DIR / "raw_model")
-DEFAULT_QUANT_MODEL_DIR = str(_SCRIPT_DIR)
+DEFAULT_QUANT_MODEL_DIR = str(_SCRIPT_DIR / "quantized_model")
 RAW_MODEL_DIR = DEFAULT_RAW_MODEL_DIR
 QUANT_MODEL_DIR = DEFAULT_QUANT_MODEL_DIR
 
@@ -120,6 +120,8 @@ def process_model(raw_model_dir=None, quantized_model_dir=None):
         RAW_MODEL_DIR = str(raw_model_dir)
     if quantized_model_dir:
         QUANT_MODEL_DIR = str(quantized_model_dir)
+    if os.path.abspath(RAW_MODEL_DIR) == os.path.abspath(QUANT_MODEL_DIR):
+        raise ValueError("raw_model_dir and quantized_model_dir must be different to protect source weights")
     print("=" * 70, flush=True)
     print("Starting F-Labs MiniCPM5-2B Quantization Pipeline", flush=True)
     print("=" * 70, flush=True)
@@ -322,7 +324,7 @@ def process_model(raw_model_dir=None, quantized_model_dir=None):
     if os.path.exists(quant_cfg_path):
         with open(quant_cfg_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
-        cfg["quantization_config"] = {
+        cfg["fquant_quantization_config"] = {
             "quant_method": "hadamard_groupwise_int4",
             "bits": 4,
             "group_size": GROUP_SIZE,
@@ -339,7 +341,7 @@ def process_model(raw_model_dir=None, quantized_model_dir=None):
         }
         with open(quant_cfg_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2)
-        print("Updated config.json with quantization_config", flush=True)
+        print("Updated config.json with FQuant quantization metadata", flush=True)
         
     print("=" * 70, flush=True)
     print("QUANTIZATION BENCHMARK SUMMARY:", flush=True)
