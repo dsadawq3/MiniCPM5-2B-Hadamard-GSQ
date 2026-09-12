@@ -31,6 +31,11 @@ class MiniCPMHadamardConfig(PretrainedConfig):
         residual_rank=16,
         bifurcation_rank=24,
         k_proj_rank=32,
+        layer_rank_map=None,
+        dense_tensor_names=None,
+        int8_tensor_names=None,
+        rotation_mode="fixed_hadamard",
+        rotation_seed=1729,
         tau_focus=1.10,
         haze_floor_margin=12.0,
         **kwargs,
@@ -61,5 +66,10 @@ class MiniCPMHadamardConfig(PretrainedConfig):
         self.residual_rank = residual_rank
         self.bifurcation_rank = bifurcation_rank
         self.k_proj_rank = k_proj_rank
+        self.layer_rank_map = dict(layer_rank_map or {})
+        self.dense_tensor_names = list(dense_tensor_names or [])
+        self.int8_tensor_names = list(int8_tensor_names or [])
+        self.rotation_mode = rotation_mode
+        self.rotation_seed = int(rotation_seed)
         self.tau_focus = tau_focus
         self.haze_floor_margin = haze_floor_margin

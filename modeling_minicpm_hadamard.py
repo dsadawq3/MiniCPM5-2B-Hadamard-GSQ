@@ -4,8 +4,9 @@ Engineered at F-Labs.
 
 Features:
 - HadamardLinear4bit: Group-wise INT4 with Walsh-Hadamard spin and Low-Rank SVD (SRC)
+- Int8Linear / DenseBF16Linear: explicit mixed-precision paths for measured risk tiers
 - ZeroCompressionShield: Pure BF16 RMSNorms, Biases, and Embeddings
-- Dynamic Bifurcation Layer Rank Allocation (Layers 14-27 with r=bifurcation_rank)
+- Adaptive L0-L3 rank allocation from calibration, spectral spikes, jumps, and curvature
 - Key-Projection Sensitivity Defense (r=k_proj_rank on k_proj)
 - KVBSSAttentionHook: Key-Value Binding Softmax Sharpening for 128K context
 - RoPE (GPT-NeoX style, theta=rope_theta, head_dim=128) + causal mask + KV-cache
@@ -29,6 +30,26 @@ except (ImportError, ValueError):
     from kv_bss import KVBSSAttentionHook
 
 _H_CACHE = {}
+
+
+def rademacher_signs(size: int, seed: int = 1729, dtype=torch.float32, device=None):
+    """Reproduce the calibration-time +/-1 input spin without storing a vector."""
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed((int(seed) + 1009 * int(size)) % (2**63 - 1))
+    bits = torch.randint(0, 2, (size,), generator=generator, dtype=torch.int8)
+    return bits.to(torch.float32).mul_(2.0).sub_(1.0).to(device=device, dtype=dtype)
+
+
+def layer_residual_rank(config, layer_idx: int, fallback: int = 16) -> int:
+    """Read a measured per-layer rank map, retaining the legacy fallback."""
+    rank_map = getattr(config, "layer_rank_map", None)
+    if isinstance(rank_map, dict):
+        value = rank_map.get(str(layer_idx), rank_map.get(layer_idx))
+        if value is not None:
+            return max(0, int(value))
+    if 14 <= layer_idx <= 27:
+        return int(getattr(config, "bifurcation_rank", 24))
+    return int(getattr(config, "residual_rank", fallback))
 
 
 def get_hadamard_matrix(n: int, dtype=torch.float32, device=None):
@@ -57,6 +78,104 @@ def apply_hadamard_rot(x: torch.Tensor, block_size: int = 128) -> torch.Tensor:
     return rotated.view(orig_shape)
 
 
+def apply_runtime_input_rotation(
+    x: torch.Tensor,
+    block_size: int,
+    rotation_mode: str,
+    rotation_signs: torch.Tensor,
+) -> torch.Tensor:
+    if x.shape[-1] % block_size != 0:
+        return x
+    if rotation_mode == "rademacher_hadamard":
+        x = x * rotation_signs.to(dtype=x.dtype, device=x.device)
+    return apply_hadamard_rot(x, block_size=block_size)
+
+
+def resolve_rotation_signs(
+    signs: torch.Tensor,
+    size: int,
+    seed: int,
+    x: torch.Tensor,
+) -> torch.Tensor:
+    """Recover non-persistent signs after low_cpu_mem_usage meta init."""
+    if signs.device.type == "meta" or signs.numel() != size or not bool(signs.any()):
+        return rademacher_signs(size, seed, dtype=x.dtype, device=x.device)
+    return signs.to(dtype=x.dtype, device=x.device)
+
+
+class DenseBF16Linear(nn.Module):
+    """Mixed-precision escape hatch for measured high-sensitivity projections."""
+
+    def __init__(self, in_features: int, out_features: int, block_size: int = 128,
+                 rotation_mode: str = "fixed_hadamard", rotation_seed: int = 1729):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.block_size = block_size
+        self.rotation_mode = rotation_mode
+        self.rotation_seed = int(rotation_seed)
+        if rotation_mode == "rademacher_hadamard":
+            signs = rademacher_signs(in_features, self.rotation_seed, dtype=torch.float32)
+        else:
+            signs = torch.ones(in_features, dtype=torch.float32)
+        self.register_buffer("rotation_signs", signs, persistent=False)
+        self.register_buffer(
+            "weight_bf16",
+            torch.zeros((out_features, in_features), dtype=torch.bfloat16),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        signs = resolve_rotation_signs(
+            self.rotation_signs, self.in_features, self.rotation_seed, x
+        )
+        x_rot = apply_runtime_input_rotation(
+            x, self.block_size, self.rotation_mode, signs
+        )
+        return F.linear(x_rot, self.weight_bf16.to(dtype=x.dtype, device=x.device))
+
+
+class Int8Linear(nn.Module):
+    """Groupwise INT8 path for medium-risk projections."""
+
+    def __init__(self, in_features: int, out_features: int, group_size: int = 64,
+                 rank: int = 16, block_size: int = 128,
+                 rotation_mode: str = "fixed_hadamard", rotation_seed: int = 1729):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.group_size = group_size
+        self.rank = rank
+        self.block_size = block_size
+        self.rotation_mode = rotation_mode
+        self.rotation_seed = int(rotation_seed)
+        if rotation_mode == "rademacher_hadamard":
+            signs = rademacher_signs(in_features, self.rotation_seed, dtype=torch.float32)
+        else:
+            signs = torch.ones(in_features, dtype=torch.float32)
+        self.register_buffer("rotation_signs", signs, persistent=False)
+        self.register_buffer("qweight_int8", torch.zeros((out_features, in_features), dtype=torch.int8))
+        self.register_buffer("scales_int8", torch.zeros((out_features, in_features // group_size), dtype=torch.bfloat16))
+        self.register_buffer("svd_a", torch.zeros((out_features, rank), dtype=torch.bfloat16))
+        self.register_buffer("svd_b", torch.zeros((rank, in_features), dtype=torch.bfloat16))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        signs = resolve_rotation_signs(
+            self.rotation_signs, self.in_features, self.rotation_seed, x
+        )
+        x_rot = apply_runtime_input_rotation(
+            x, self.block_size, self.rotation_mode, signs
+        )
+        m, n = self.qweight_int8.shape
+        w_float = (
+            self.qweight_int8.float().view(m, n // self.group_size, self.group_size)
+            * self.scales_int8.to(dtype=torch.float32).unsqueeze(-1)
+        ).view(m, n).to(dtype=x.dtype)
+        out_base = F.linear(x_rot, w_float)
+        x_svd = F.linear(x_rot, self.svd_b.to(dtype=x.dtype, device=x.device))
+        out_res = F.linear(x_svd, self.svd_a.to(dtype=x.dtype, device=x.device))
+        return out_base + out_res
+
+
 class HadamardLinear4bit(nn.Module):
     """
     4-bit Group-Scale Quantized Linear layer with:
@@ -65,13 +184,25 @@ class HadamardLinear4bit(nn.Module):
     3. Low-Rank Residual SVD Compensation: Y = X' W_quant^T + (X' B^T) A^T
     """
 
-    def __init__(self, in_features: int, out_features: int, group_size: int = 64, rank: int = 16, block_size: int = 128):
+    def __init__(self, in_features: int, out_features: int, group_size: int = 64,
+                 rank: int = 16, block_size: int = 128, rotation_mode: str = "fixed_hadamard",
+                 rotation_seed: int = 1729):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.group_size = group_size
         self.rank = rank
         self.block_size = block_size
+        self.rotation_mode = rotation_mode
+        self.rotation_seed = int(rotation_seed)
+
+        if self.rotation_mode == "rademacher_hadamard":
+            signs = rademacher_signs(
+                in_features, self.rotation_seed, dtype=torch.float32
+            )
+        else:
+            signs = torch.ones(in_features, dtype=torch.float32)
+        self.register_buffer("rotation_signs", signs, persistent=False)
 
         self.register_buffer("qweight_packed", torch.zeros((out_features, in_features // 2), dtype=torch.uint8))
         self.register_buffer("scales", torch.zeros((out_features, in_features // group_size), dtype=torch.bfloat16))
@@ -79,10 +210,12 @@ class HadamardLinear4bit(nn.Module):
         self.register_buffer("svd_b", torch.zeros((rank, in_features), dtype=torch.bfloat16))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.in_features % self.block_size == 0:
-            x_rot = apply_hadamard_rot(x, block_size=self.block_size)
-        else:
-            x_rot = x
+        signs = resolve_rotation_signs(
+            self.rotation_signs, self.in_features, self.rotation_seed, x
+        )
+        x_rot = apply_runtime_input_rotation(
+            x, self.block_size, self.rotation_mode, signs
+        )
 
         low = (self.qweight_packed & 0x0F).to(torch.int8)
         low = torch.where(low >= 8, low - 16, low)
@@ -101,6 +234,22 @@ class HadamardLinear4bit(nn.Module):
         out_res = F.linear(x_svd, self.svd_a.to(x.dtype))
 
         return out_base + out_res
+
+
+def make_projection(config, full_name: str, in_features: int, out_features: int,
+                    rank: int, linear_kwargs):
+    dense_names = getattr(config, "dense_tensor_names", ())
+    int8_names = getattr(config, "int8_tensor_names", ())
+    if full_name in dense_names:
+        return DenseBF16Linear(in_features, out_features, **{
+            key: linear_kwargs[key]
+            for key in ("block_size", "rotation_mode", "rotation_seed")
+        })
+    if full_name in int8_names:
+        return Int8Linear(in_features, out_features, rank=rank, **linear_kwargs)
+    return HadamardLinear4bit(
+        in_features, out_features, rank=rank, **linear_kwargs
+    )
 
 
 class MiniCPMRMSNorm(nn.Module):
@@ -196,14 +345,20 @@ class MiniCPMAttention(nn.Module):
         self.head_dim = config.head_dim
         self.num_key_value_heads = config.num_key_value_heads
 
-        is_bifurcation = 14 <= layer_idx <= 27
-        res_rank = getattr(config, "bifurcation_rank", 24) if is_bifurcation else getattr(config, "residual_rank", 16)
+        res_rank = layer_residual_rank(config, layer_idx)
         k_rank = getattr(config, "k_proj_rank", 32)
 
-        self.k_proj = HadamardLinear4bit(self.hidden_size, self.num_key_value_heads * self.head_dim, group_size=config.group_size, rank=k_rank)
-        self.q_proj = HadamardLinear4bit(self.hidden_size, self.num_heads * self.head_dim, group_size=config.group_size, rank=res_rank)
-        self.v_proj = HadamardLinear4bit(self.hidden_size, self.num_key_value_heads * self.head_dim, group_size=config.group_size, rank=res_rank)
-        self.o_proj = HadamardLinear4bit(self.num_heads * self.head_dim, self.hidden_size, group_size=config.group_size, rank=res_rank)
+        linear_kwargs = dict(
+            group_size=config.group_size,
+            block_size=getattr(config, "hadamard_block_size", 128),
+            rotation_mode=getattr(config, "rotation_mode", "fixed_hadamard"),
+            rotation_seed=getattr(config, "rotation_seed", 1729),
+        )
+        prefix = f"model.layers.{layer_idx}.self_attn"
+        self.k_proj = make_projection(config, f"{prefix}.k_proj", self.hidden_size, self.num_key_value_heads * self.head_dim, k_rank, linear_kwargs)
+        self.q_proj = make_projection(config, f"{prefix}.q_proj", self.hidden_size, self.num_heads * self.head_dim, res_rank, linear_kwargs)
+        self.v_proj = make_projection(config, f"{prefix}.v_proj", self.hidden_size, self.num_key_value_heads * self.head_dim, res_rank, linear_kwargs)
+        self.o_proj = make_projection(config, f"{prefix}.o_proj", self.num_heads * self.head_dim, self.hidden_size, res_rank, linear_kwargs)
 
         self.kv_bss = KVBSSAttentionHook(tau_focus=config.tau_focus, haze_floor_margin=config.haze_floor_margin)
 
@@ -248,12 +403,18 @@ class MiniCPMAttention(nn.Module):
 class MiniCPMMLP(nn.Module):
     def __init__(self, config: MiniCPMHadamardConfig, layer_idx: int = 0):
         super().__init__()
-        is_bifurcation = 14 <= layer_idx <= 27
-        res_rank = getattr(config, "bifurcation_rank", 24) if is_bifurcation else getattr(config, "residual_rank", 16)
+        res_rank = layer_residual_rank(config, layer_idx)
 
-        self.gate_proj = HadamardLinear4bit(config.hidden_size, config.intermediate_size, group_size=config.group_size, rank=res_rank)
-        self.up_proj = HadamardLinear4bit(config.hidden_size, config.intermediate_size, group_size=config.group_size, rank=res_rank)
-        self.down_proj = HadamardLinear4bit(config.intermediate_size, config.hidden_size, group_size=config.group_size, rank=res_rank)
+        linear_kwargs = dict(
+            group_size=config.group_size,
+            block_size=getattr(config, "hadamard_block_size", 128),
+            rotation_mode=getattr(config, "rotation_mode", "fixed_hadamard"),
+            rotation_seed=getattr(config, "rotation_seed", 1729),
+        )
+        prefix = f"model.layers.{layer_idx}.mlp"
+        self.gate_proj = make_projection(config, f"{prefix}.gate_proj", config.hidden_size, config.intermediate_size, res_rank, linear_kwargs)
+        self.up_proj = make_projection(config, f"{prefix}.up_proj", config.hidden_size, config.intermediate_size, res_rank, linear_kwargs)
+        self.down_proj = make_projection(config, f"{prefix}.down_proj", config.intermediate_size, config.hidden_size, res_rank, linear_kwargs)
 
     def forward(self, x):
         return self.down_proj(F.silu(self.gate_proj(x)) * self.up_proj(x))
