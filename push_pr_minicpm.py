@@ -19,8 +19,40 @@ FILES_TO_COMMIT = [
     "test_inference.py",
 ]
 
-INTEGRATION_MD = """# MiniCPM5-2B-Hadamard-GSQ: Complete Edge Quantization & KV-BSS Architecture
-...
+INTEGRATION_MD = """# MiniCPM5-2B-Hadamard-GSQ: KV-BSS integration
+
+This pull request contains a self-contained implementation of the custom
+MiniCPM Hadamard model path and the KV-BSS attention hook.
+
+## Included source files
+
+1. `configuration_minicpm_hadamard.py` defines the model and quantization
+   parameters, including the KV-BSS controls.
+2. `modeling_minicpm_hadamard.py` implements the model, causal masking, RoPE,
+   grouped-query attention, and legacy tuple cache support.
+3. `kv_bss.py` implements focus scaling and haze-floor filtering with explicit
+   shape validation and finite handling for fully masked rows.
+4. `test_inference.py` exercises a finite forward pass, GQA validation,
+   2D/4D attention-mask behavior, and cached-versus-uncached logit parity.
+
+## Verification
+
+Run from the model-code directory:
+
+```bash
+python -m unittest discover -s . -p 'test_inference.py' -v
+```
+
+The test is intentionally small and CPU-only. It validates implementation
+behavior without downloading a checkpoint and does not claim benchmark
+accuracy or long-context quality.
+
+## Scope
+
+The PR contains code and tests only. The separately published quantized
+checkpoint and its calibration report are linked from the model card:
+
+https://huggingface.co/F-Labs/MiniCPM5-2B-Hadamard-GSQ
 """
 
 
@@ -54,13 +86,13 @@ def main() -> int:
         path_or_fileobj=INTEGRATION_MD.encode("utf-8"),
     ))
 
-    print(f"Submitting {len(operations)} production files to {args.revision} on {args.repo}...")
+    print(f"Submitting {len(operations)} reviewed files to {args.revision} on {args.repo}...")
     commit_info = api.create_commit(
         repo_id=args.repo,
         repo_type="model",
         revision=args.revision,
         operations=operations,
-        commit_message="Add complete production modeling, configuration, test suite, and integration documentation",
+        commit_message="Harden KV-BSS masking and add numerical cache tests",
     )
     print("PR updated successfully:", commit_info)
     return 0
