@@ -93,15 +93,22 @@ class KVBSSAttentionHook(nn.Module):
         if not math.isfinite(float(scaling)) or float(scaling) <= 0:
             raise ValueError("scaling must be finite and greater than zero")
 
-        scores = torch.matmul(query, key.transpose(-1, -2)) * scaling
+        # Attention score accumulation in BF16 can overflow even when most
+        # individual activations are finite. Compute the score path in FP32 and
+        # isolate invalid query/key positions instead of taking down generation.
+        query_valid = torch.isfinite(query).all(dim=-1, keepdim=True)
+        key_valid = torch.isfinite(key).all(dim=-1).unsqueeze(-2)
+        query_fp32 = torch.nan_to_num(query.float(), nan=0.0, posinf=0.0, neginf=0.0)
+        key_fp32 = torch.nan_to_num(key.float(), nan=0.0, posinf=0.0, neginf=0.0)
+        scores = torch.matmul(query_fp32, key_fp32.transpose(-1, -2)) * float(scaling)
         scores = scores * self.tau_focus
-        if not torch.isfinite(scores).all():
-            raise FloatingPointError("KV-BSS received non-finite query/key scores")
+        score_valid = torch.isfinite(scores)
+        scores = torch.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0)
 
         additive_mask, hard_valid = self._prepare_mask(attention_mask, scores)
         scores = scores + additive_mask
         hard_valid = hard_valid.expand_as(scores)
-        hard_valid = hard_valid & torch.isfinite(scores)
+        hard_valid = hard_valid & score_valid & query_valid & key_valid
 
         row_has_valid = hard_valid.any(dim=-1, keepdim=True)
         neg_inf = torch.tensor(float("-inf"), dtype=scores.dtype, device=scores.device)
@@ -111,10 +118,11 @@ class KVBSSAttentionHook(nn.Module):
         # positions cannot receive probability mass at any supported dtype.
         scores = scores.masked_fill(~keep, torch.finfo(scores.dtype).min)
 
-        probs = F.softmax(scores, dim=-1, dtype=torch.float32).to(query.dtype)
+        probs = F.softmax(scores, dim=-1, dtype=torch.float32)
         # A fully masked row is invalid input for ordinary softmax. Returning
         # a finite zero vector keeps the failure contained and avoids NaN
         # propagation through a whole decoder stack.
         probs = probs * row_has_valid.to(dtype=probs.dtype)
-        out = torch.matmul(probs, value)
-        return out
+        value_fp32 = torch.nan_to_num(value.float(), nan=0.0, posinf=0.0, neginf=0.0)
+        out = torch.matmul(probs, value_fp32)
+        return torch.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0).to(query.dtype)

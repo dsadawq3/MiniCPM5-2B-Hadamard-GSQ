@@ -79,5 +79,15 @@ class MiniCPMNumericalTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             hook(q, k, v, attention_mask=torch.ones(1, 3))
 
+    def test_nonfinite_scores_are_contained(self):
+        hook = KVBSSAttentionHook(tau_focus=1.0, haze_floor_margin=12.0)
+        q = torch.zeros(1, 2, 2, 4, dtype=torch.bfloat16)
+        k = torch.zeros(1, 1, 2, 4, dtype=torch.bfloat16)
+        v = torch.ones(1, 1, 2, 4, dtype=torch.bfloat16)
+        q[0, 0, 0, 0] = float("nan")
+        k[0, 0, 1, 0] = float("inf")
+        out = hook(q, k, v)
+        self.assertTrue(torch.isfinite(out).all())
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
